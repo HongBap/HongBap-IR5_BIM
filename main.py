@@ -209,7 +209,7 @@ if __name__ == "__main__":
                 break
             elif j == max_iterations - 1:
                 print("query ", i + 1)
-                print(relevant_docs)
+                print(relevant_docs_copy)
 
 
     end_time = time.time()
