@@ -1,8 +1,11 @@
+'''
+N19DCCN067 - Ngô Sơn Hồng
+N19dccn070 - Lê Quang Hùng
+N19dccn112 - Nguyễn Thị Huỳnh My
+'''
 import math
 import re
 import time
-
-import nltk
 from nltk import word_tokenize
 from nltk.corpus import stopwords
 
@@ -19,13 +22,6 @@ def remove_stopwords(documents):
 def read_file_and_modify(filename):
     with open(filename, 'r') as f:
         text = f.read()
-    # clean_text = re.sub(r'\n', '', text)
-    # clean_text = re.sub(r'\d+', '', clean_text)
-    # clean_text = clean_text.strip().split("/")
-    # clean_text = [doc.strip().lower() for doc in clean_text]
-    # clean_text = remove_stopwords(clean_text)
-    # clean_text.pop()
-    # return clean_text
     clean_text = text.replace('\n', '')
     # Xoá khoảng trắng ở đầu và cuối
     clean_text = clean_text.strip()
