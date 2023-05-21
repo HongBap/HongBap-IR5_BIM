@@ -8,7 +8,6 @@ from nltk.corpus import stopwords
 
 stop_words = set(stopwords.words('english'))
 
-# Xử lý file doc và query
 def remove_stopwords(documents):
     filtered_documents = []
     for doc in documents:
@@ -17,17 +16,32 @@ def remove_stopwords(documents):
         filtered_documents.append(' '.join(filtered_words))
     return filtered_documents
 
-
 def read_file_and_modify(filename):
     with open(filename, 'r') as f:
         text = f.read()
-    clean_text = re.sub(r'\n', '', text)
+    # clean_text = re.sub(r'\n', '', text)
+    # clean_text = re.sub(r'\d+', '', clean_text)
+    # clean_text = clean_text.strip().split("/")
+    # clean_text = [doc.strip().lower() for doc in clean_text]
+    # clean_text = remove_stopwords(clean_text)
+    # clean_text.pop()
+    # return clean_text
+    clean_text = text.replace('\n', '')
+    # Xoá khoảng trắng ở đầu và cuối
+    clean_text = clean_text.strip()
+    # Xoá khoảng cách thừa giữa các từ
+    words = clean_text.split()
+    clean_text = ' '.join(words)
+    # Xoá số
     clean_text = re.sub(r'\d+', '', clean_text)
-    clean_text = clean_text.strip().split("/")
-    clean_text = [doc.strip().lower() for doc in clean_text]
-    return clean_text
+    # Tách văn bản giữa các tài liệu
+    documents = clean_text.split("/")
+    clean_documents = [doc.strip().lower() for doc in documents]
+    # Xoá stop words
+    clean_documents = remove_stopwords(clean_documents)
+    clean_documents.pop()
+    return clean_documents
 
-#tạo chỉ mục ngược
 def create_inverted_index(docs):
     '''
     Khởi tạo Inverted Index từ các docs
@@ -43,7 +57,6 @@ def create_inverted_index(docs):
                 inverted_index[word].append(i + 1)
     return inverted_index
 
-
 def get_df(inverted_index, term):
     '''
     trả về số lượng doc chứ từ khóa term tong inverted_index
@@ -52,19 +65,31 @@ def get_df(inverted_index, term):
         return len(inverted_index[term])
     return 0
 
-
 def intersection_d_q(doc, query):
     '''
     tìm và trả về danh sách các từ chung (giao) giữa doc và query.
     '''
     return list(set(doc.split()) & set(query.split()))
 
+def get_len_Vi(relevant_docs, term, docs):
+    '''
+    Tính |Vi|
+    '''
+    Vi = []
+    for doc in relevant_docs:
+        print(doc)
+        doc_id = doc['doc_id']
+        list = docs[doc_id - 1].split()
+        if term in list:
+            Vi.append(doc_id)
+    return len(Vi)
+
 def preweight(inverted_index, docs):
     '''
-    Tính toán trọng số BIM ban đầu dựa trên công thức:
-    c(t) = log((N-df + 0.5)/(df+0.5))
+    Tính toán trọng số BIM ban đầu với công thức:
+        c(t) = log((N-df + 0.5)/(df+0.5))
     '''
-    N = len(docs) - 1
+    N = len(docs)
     weight_i_index = []
     for term in inverted_index:
         term_df = get_df(inverted_index, term)
@@ -83,7 +108,7 @@ def find_term(weighten_inverted_index, term):
             return index
     return -1
 
-def query_BIM(weighten_inverted_index, query, docs):
+def compute_RSV(weighten_inverted_index, query, docs):
     '''
     Tính toán RSV là tổng các weight term trong querry
     '''
@@ -100,28 +125,96 @@ def query_BIM(weighten_inverted_index, query, docs):
             docs_computed_RSV.append({"doc_id": doc_index + 1, "rsv": rsv})
     return docs_computed_RSV
 
+def update_rsv(doc_id, new_rsv, relevant_docs):
+    for doc in relevant_docs:
+        if doc['doc_id'] == doc_id:
+            doc['rsv'] = new_rsv
+            break
+
+def compute_RSV_after_estimate_pi(relevant_docs, weighten_inverted_index, query, docs):
+    doc_ids = [doc['doc_id'] for doc in relevant_docs]
+    for doc_id in doc_ids:
+        rsv = 0  # Khởi tạo RSV cho mỗi tài liệu
+        positive_terms = intersection_d_q(docs[doc_id - 1], query)
+        if len(positive_terms) > 0:
+            for term in positive_terms:
+                term_index = find_term(weighten_inverted_index, term)
+                if term_index is not None:
+                    rsv += weighten_inverted_index[term_index]['c']
+            update_rsv(doc_id, rsv, relevant_docs)
+
+def estimate_ci(relevant_docs, query, weighten_inverted_index, inverted_index, docs):
+    '''
+    relevant_docs: tập văn bản phù hợp
+    |Vi|: số lượng văn bản trong relevant_docs chứa term
+    '''
+    V = [doc['doc_id'] for doc in relevant_docs]
+    N = len(docs)
+    len_V = len(V)
+    for term in query.split():
+        len_Vi = get_len_Vi(relevant_docs, term, docs)
+        if len_Vi <= 0: # weight = 0
+            continue
+        else: # xi = qi = 1: từ xuất hiện trong query và top văn bản đã chọn
+            ni = get_df(inverted_index, term) # số văn bản chứa term
+            pi = (len_Vi + 0.5) / (len_V + 1)
+            ri = (ni - len_Vi + 0.5) / (N - len_V + 1)
+            c_i = math.log((pi * (1 - ri)) / (ri * (1 - pi)))
+
+        index = find_term(weighten_inverted_index, term)
+        weighten_inverted_index[index]['c'] = c_i
 
 def sort_by_RSV(evaluated_list):
     return sorted(evaluated_list, key=lambda x: -x['rsv'])
+
+def get_top_rsv(weighten_inverted_index, queries, docs):
+    top_rsv = 5
+    result = []
+    for query_idx, query in enumerate(queries):
+        evaluated_list = compute_RSV(weighten_inverted_index, query, docs)
+        sorted_evaluated_list = sort_by_RSV(evaluated_list)
+        result.append({"query_id": query_idx + 1, "doc_list": sorted_evaluated_list[:top_rsv]})
+    return result
+
 
 if __name__ == "__main__":
     start_time = time.time()
     docs = read_file_and_modify("doc-text")
     queries = read_file_and_modify("query-text")
-    # phần tử cuối là rỗng, nên bỏ
-    queries = queries[:-1]
-    # Filter stop words
-    docs = remove_stopwords(docs)
-    queries = remove_stopwords(queries)
 
-    inverted_index = create_inverted_index(docs)  # {'từ khóa': [tài liệu 1, tài liệu 2, ...]}
+    # 1. Tạo chỉ mục ngược
+    inverted_index = create_inverted_index(docs)
     weighten_inverted_index = preweight(inverted_index,docs)
-    results = []
-    for query_idx, query in enumerate(queries):
-        evaluated_list = query_BIM(weighten_inverted_index, query, docs)
-        sorted_evaluated_list = sort_by_RSV(evaluated_list)
-        results.append({"query_id": query_idx + 1, "doc_list": sorted_evaluated_list[:5]})
-    print(results)
+
+    # 2. Tìm top 5 văn bản có rsv cao nhất cho mỗi truy vấn
+    top_doc_rsv_of_queries = get_top_rsv(weighten_inverted_index, queries, docs)
+
+    max_iterations = 10
+    previous_result = []  # Kết quả trước đó
+    for i, query_result in enumerate(top_doc_rsv_of_queries):
+        query_id = query_result['query_id']
+        top_docs = query_result['doc_list'][:5]
+
+        relevant_docs = top_docs
+        relevant_docs_copy = relevant_docs.copy()
+
+        if len(top_docs) == 0:
+            break
+        for j in range(max_iterations):
+            estimate_ci(relevant_docs, queries[i], weighten_inverted_index, inverted_index, docs)
+            compute_RSV_after_estimate_pi(relevant_docs, weighten_inverted_index, queries[i], docs)
+            relevant_docs_copy.sort(key=lambda x: x['rsv'], reverse=True)
+            doc_ids_before = [doc['doc_id'] for doc in relevant_docs]
+            doc_ids_after = [doc['doc_id'] for doc in relevant_docs_copy]
+            if doc_ids_after == doc_ids_before:
+                print("query ", i + 1)
+                print(relevant_docs_copy)
+                print('\n')
+                break
+            elif j == max_iterations - 1:
+                print("query ", i + 1)
+                print(relevant_docs)
+
 
     end_time = time.time()
     total_time = end_time - start_time
